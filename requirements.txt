@@ -15,5 +15,4 @@ requests==2.31.0
 
 # Nếu dùng Frontend React (thư viện phía client)
 # Các thư viện này thường nằm trong package.json của frontend, 
-# nhưng ghi chú ở đây để bạn nhớ cài:
 # axios, leaflet, react-leaflet
