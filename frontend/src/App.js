@@ -11,7 +11,7 @@ function App() {
   const [path, setPath] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trafficSegments, setTrafficSegments] = useState([]);
-
+  const pathIntervalRef = React.useRef(null);
   // --- TRẠNG THÁI ADMIN PANEL ---
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminType, setAdminType] = useState('congestion'); 
@@ -29,11 +29,45 @@ function App() {
       console.error("Lỗi khi lấy dữ liệu traffic:", error);
     }
   }, []);
+ 
+  // Tạo useEffect mới
+  useEffect(() => {
+    // Khi component bị đóng, xóa interval ngay lập tức
+    return () => {
+        if (pathIntervalRef.current) clearInterval(pathIntervalRef.current);
+    };
+}, []); 
 
   useEffect(() => {
     refreshTrafficData();
   }, [refreshTrafficData]);
+  
+  // Hiện từng node trên đường đi
+  const animatePath = (fullPath) => {
+    // Bước A: Xóa bỏ mọi interval đang chạy trước đó (nếu có)
+    if (pathIntervalRef.current) {
+        clearInterval(pathIntervalRef.current);
+    }
 
+    // Bước B: Reset đường đi về rỗng để bắt đầu vẽ từ đầu
+    setPath([]); 
+    
+    let currentIndex = 0;
+    const speed = 30; // Tốc độ vẽ: 30ms/node. Bạn có thể tăng lên 50 nếu muốn chậm hơn.
+
+    // Bước C: Thiết lập interval để nạp dần tọa độ
+    pathIntervalRef.current = setInterval(() => {
+        if (currentIndex < fullPath.length) {
+            // Cập nhật path: lấy thêm 1 node mỗi lần chạy
+            setPath(fullPath.slice(0, currentIndex + 1));
+            currentIndex++;
+        } else {
+            // Bước D: Khi vẽ xong thì dọn dẹp interval
+            clearInterval(pathIntervalRef.current);
+            pathIntervalRef.current = null;
+        }
+    }, speed);
+}; 
   // --- LOGIC TÌM ĐƯỜNG ĐỒNG BỘ VỚI BACKEND ---
   const performRouting = async (s, e) => {
     if (!s || !e) return;
@@ -58,7 +92,8 @@ function App() {
 
       // 2. Xử lý thành công
       if (data.status === "success" && data.path && data.path.length > 0) {
-        setPath(data.path);
+        //setPath(data.path)
+        animatePath(data.path); 
 
         // --- CẢI TIẾN QUAN TRỌNG: SNAP MARKER TO ROAD ---
         // Lấy tọa độ Node thực tế đầu tiên và cuối cùng từ kết quả của Backend
