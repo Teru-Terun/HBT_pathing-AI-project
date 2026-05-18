@@ -13,6 +13,7 @@ hbt-routing-system/
 │   │   └── spatial_index.py    # Xử lý chỉ mục không gian (R-Tree/KD-Tree)
 │   ├── core/                   # Lớp thuật toán cốt lõi
 │   │   ├── a_star.py           # Thuật toán A* với Heuristic Haversine
+│   │   ├── dijkstra.py         # Thuật toán Dijkstra
 │   │   └── weights.py          # Tính toán trọng số cạnh (khoảng cách + traffic)
 │   ├── api/                    # Giao tiếp giữa Backend và Frontend
 │   │   └── main.py             # FastAPI/Flask khởi tạo các endpoint

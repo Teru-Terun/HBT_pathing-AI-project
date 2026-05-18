@@ -6,9 +6,7 @@ from collections import defaultdict
 # Thêm đường dẫn gốc của project
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from src.utils.geo_utils import haversine_distance
-
-class AStarSolver:
+class DijkstraSolver:
     def __init__(self, graph, nodes):
         """
         graph: Adjacency list {u: {v: edge_data}}
@@ -18,56 +16,41 @@ class AStarSolver:
         self.nodes = nodes
         self.INF_THRESHOLD = 999999.0
 
-    def heuristic(self, u, v):
-        """Hàm h(n): Khoảng cách chim bay"""
-        try:
-            lat1, lon1 = self.nodes[u]
-            lat2, lon2 = self.nodes[v]
-            return haversine_distance(lat1, lon1, lat2, lon2)
-        except (KeyError, TypeError):
-            return self.INF_THRESHOLD
-
     def solve(self, start_node, goal_node, cost_fn=None, return_history=False):
         """
-        Tìm đường đi tối ưu A* với chi phí động.
-        Thêm tham số return_history: Nếu True, trả về (path, visited_order)
+        Tìm đường đi ngắn nhất bằng Dijkstra.
         """
         if start_node not in self.nodes or goal_node not in self.nodes:
-            print(f"Lỗi: Node {start_node} hoặc {goal_node} không tồn tại trong dữ liệu.")
+            print(f"Lỗi: Node {start_node} hoặc {goal_node} không tồn tại.")
             return (None, []) if return_history else None
 
+        # Priority Queue lưu (g_score, current_node)
         open_set = []
         heapq.heappush(open_set, (0, start_node))
+        
         came_from = {}
         
+        # g_score: Khoảng cách thực tế tích lũy từ điểm xuất phát
         g_score = defaultdict(lambda: float('inf'))
         g_score[start_node] = 0
-
-        f_score = defaultdict(lambda: float('inf'))
-        f_score[start_node] = self.heuristic(start_node, goal_node)
-
-        closed_set = set()
         
-        # 🟢 Mảng lưu trữ thứ tự các Node đã được khám phá
-        visited_order = []
+        closed_set = set()
+        visited_order = [] # Nhật ký loang màu
 
         while open_set:
-            current_f, current = heapq.heappop(open_set)
+            current_g, current = heapq.heappop(open_set)
 
-            # Bỏ qua nếu node đã được duyệt qua từ một đường ngắn hơn trước đó
+            # Bỏ qua nếu node đã được chốt (tránh duyệt lại)
             if current in closed_set:
                 continue
-            
-            # 🟢 Ghi vào nhật ký: Thuật toán quyết định "đứng" tại Node này để nhìn xung quanh
+                
             if return_history:
                 visited_order.append(current)
 
             # Nếu đã đến đích
             if current == goal_node:
                 path = self._reconstruct_path(came_from, current)
-                if return_history:
-                    return path, visited_order
-                return path
+                return (path, visited_order) if return_history else path
 
             closed_set.add(current)
             neighbors = self.graph.get(current, {})
@@ -79,24 +62,24 @@ class AStarSolver:
 
                 v_coord = self.nodes[neighbor]
 
+                # Tính trọng số cạnh
                 if cost_fn:
                     weight = cost_fn(current, neighbor, u_coord, v_coord, edge_data)
                 else:
-                    weight = edge_data.get('weight', self.heuristic(current, neighbor))
+                    weight = edge_data.get('weight', 1.0) # Mặc định
 
+                # Chặn đường ngập lụt
                 if weight >= self.INF_THRESHOLD:
                     continue
 
                 tentative_g_score = g_score[current] + weight
 
+                # Nếu tìm thấy đường ngắn hơn để đến neighbor này
                 if tentative_g_score < g_score[neighbor]:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     
-                    h_n = self.heuristic(neighbor, goal_node)
-                    f_score[neighbor] = tentative_g_score + h_n
-                    
-                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+                    heapq.heappush(open_set, (tentative_g_score, neighbor))
 
         # Trả về kết quả khi không tìm thấy đường
         if return_history:
