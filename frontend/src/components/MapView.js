@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Polyline, Rectangle, useMapEvents, useMap } from 'react-leaflet';
+// 🌟 MỚI: Thêm CircleMarker vào danh sách import
+import { MapContainer, TileLayer, Marker, Polyline, Rectangle, useMapEvents, useMap, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -41,6 +42,7 @@ const MapView = ({
     startCoord, 
     endCoord, 
     path, 
+    visitedNodes, // 🌟 MỚI: Hứng mảng dữ liệu loang màu từ App.js truyền xuống
     onMapClick, 
     onMapRightClick, 
     isAdminMode,
@@ -48,8 +50,7 @@ const MapView = ({
     trafficSegments 
 }) => {
     const hbtCenter = [21.012, 105.850];
-    const [mapBounds, setMapBounds] = useState(null);
-    
+    const [mapBounds, setMapBounds] = useState(null);    
     // Tọa độ bao quanh quận Hai Bà Trưng (Bounding Box)
     const boundsHBT = [
         [20.985, 105.825], // Góc Tây Nam
@@ -169,6 +170,23 @@ const MapView = ({
                             />
                         );
                     })}
+
+                    {/* 🌟 MỚI: VẼ HIỆU ỨNG AI ĐANG QUÉT (VISUAL MODE) */}
+                    {/* Đặt nó ở trên Polyline đường chính để đường xanh dương đè lên trên cho đẹp */}
+                    {visitedNodes && visitedNodes.length > 0 && visitedNodes.map((node, idx) => (
+                        <CircleMarker 
+                            key={`visited-${idx}`}
+                            center={[node.lat, node.lng]}
+                            radius={5} // Độ to của chấm tròn
+                            pathOptions={{
+                                color: '#9b59b6', // Màu tím công nghệ
+                                fillColor: '#9b59b6',
+                                fillOpacity: 0.4,
+                                stroke: false, // Bỏ viền cho mượt
+                                interactive: false // Không cho click vào chấm tròn
+                            }}
+                        />
+                    ))}
 
                     {/* LỘ TRÌNH A* CHÍNH */}
                     {path && path.length > 0 && (
