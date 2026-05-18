@@ -14,7 +14,6 @@ from src.data_processing.spatial_index import SpatialIndex
 from src.data_processing.traffic_manager import TrafficManager
 from src.algorithms.astar import AStarSolver
 from src.algorithms.cost_functions import CostCalculator
-from src.algorithms.dijkstra import DijkstraSolver
 
 app = FastAPI(title="HBT Routing System API - Hai Ba Trung District")
 
@@ -38,12 +37,10 @@ spatial_index = None
 traffic_mgr = None
 cost_calc = None
 solver = None
-dijkstra_solver = None # 🌟 [CẬP NHẬT 1]: Khai báo thêm biến toàn cục cho Dijkstra
 
 @app.on_event("startup")
 async def startup_event():
-    # 🌟 [CẬP NHẬT 2]: Thêm dijkstra_solver vào danh sách global
-    global graph_data, spatial_index, traffic_mgr, cost_calc, solver, dijkstra_solver
+    global graph_data, spatial_index, traffic_mgr, cost_calc, solver
     
     print("\n--- 🚀 Đang khởi động hệ thống Backend ---")
     
@@ -72,10 +69,7 @@ async def startup_event():
         # 3. Khởi tạo Logic Bus
         traffic_mgr = TrafficManager()
         cost_calc = CostCalculator(traffic_manager=traffic_mgr)
-        
-        # 🌟 [CẬP NHẬT 3]: Khởi tạo cả 2 "bộ não" cùng lúc
         solver = AStarSolver(graph_data['graph'], graph_data['nodes'])
-        dijkstra_solver = DijkstraSolver(graph_data['graph'], graph_data['nodes'])
         
         # 4. Tải Spatial Index (Dùng phương thức Load để khôi phục hoàn toàn KDTree)
         spatial_index = SpatialIndex.load_index(INDEX_PATH)
@@ -96,8 +90,6 @@ class RouteRequest(BaseModel):
     start_lon: float
     end_lat: float
     end_lon: float
-    visualize: bool = False  
-    algorithm: str = "astar"  # Mặc định là astar
 
 class TrafficPathUpdate(BaseModel):
     path_coordinates: List[Tuple[float, float]]
@@ -112,9 +104,8 @@ def find_path(request: RouteRequest):
     print(f"\n[DEBUG] Yêu cầu tìm đường:")
     print(f"📍 Bắt đầu: ({request.start_lat}, {request.start_lon})")
     print(f"🏁 Kết thúc: ({request.end_lat}, {request.end_lon})")
-    print(f"👁️ Chế độ Visual: {request.visualize} | 🧠 Thuật toán: {request.algorithm}")
 
-    if spatial_index is None or solver is None or dijkstra_solver is None:
+    if spatial_index is None or solver is None:
         return {
             "status": "error",
             "message": "Hệ thống chưa sẵn sàng hoặc dữ liệu chưa được nạp."
@@ -132,23 +123,12 @@ def find_path(request: RouteRequest):
                 "message": f"Vị trí bạn chọn ({request.start_lat:.4f}, {request.start_lon:.4f}) nằm ngoài phạm vi hỗ trợ của quận Hai Bà Trưng!"
             }
 
-        # 🌟 [CẬP NHẬT 4]: Gạt công tắc chọn thuật toán dựa trên yêu cầu từ Frontend
-        active_solver = dijkstra_solver if request.algorithm == "dijkstra" else solver
-
-        # Thực thi với bộ não đã chọn (chi phí động + cờ return_history)
-        result = active_solver.solve(
+        # Thực thi A* với chi phí động (Tắc đường/Ngập lụt)
+        path_ids = solver.solve(
             start_node=u_start, 
             goal_node=v_end, 
-            cost_fn=cost_calc.dynamic_cost,
-            return_history=request.visualize
+            cost_fn=cost_calc.dynamic_cost
         )
-
-        # Bóc tách kết quả dựa trên việc có yêu cầu lịch sử hay không
-        if request.visualize:
-            path_ids, history_ids = result
-        else:
-            path_ids = result
-            history_ids = []
 
         if not path_ids:
             return {
@@ -158,14 +138,10 @@ def find_path(request: RouteRequest):
 
         # Chuyển ID Node thành tọa độ Map
         path_coords = [{"lat": graph_data['nodes'][node_id][0], "lng": graph_data['nodes'][node_id][1]} for node_id in path_ids]
-        
-        # Chuyển ID của mảng lịch sử thành tọa độ Map
-        history_coords = [{"lat": graph_data['nodes'][node_id][0], "lng": graph_data['nodes'][node_id][1]} for node_id in history_ids]
 
         return {
             "status": "success",
             "path": path_coords,
-            "history": history_coords, 
             "metadata": {"total_nodes": len(path_ids)}
         }
     except Exception as e:
@@ -189,7 +165,6 @@ def update_traffic(update: TrafficPathUpdate):
             return {"status": "error", "message": "Vùng bạn vẽ nằm ngoài phạm vi bản đồ."}
 
         # Tìm chuỗi node thực tế trên phố đó (dùng chi phí khoảng cách thuần túy)
-        # Lưu ý: Ở đây ta vẫn dùng `solver` (A*) vì nó tìm đường thẳng nhanh hơn để map tọa độ admin, không cần dùng dijkstra
         path_nodes = solver.solve(
             start_node=u_start, 
             goal_node=v_end, 

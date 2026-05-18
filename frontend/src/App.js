@@ -6,105 +6,113 @@ import { findPath, updateTraffic, resetTraffic, getActiveTraffic } from './api';
 import './App.css';
 
 function App() {
-  // --- STATE CƠ BẢN ---
   const [start, setStart] = useState(null);
   const [end, setEnd] = useState(null);
   const [path, setPath] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trafficSegments, setTrafficSegments] = useState([]);
-
-  // --- STATE ADMIN PANEL ---
+  const pathIntervalRef = React.useRef(null);
+  // --- TRẠNG THÁI ADMIN PANEL ---
   const [isAdmin, setIsAdmin] = useState(false); 
   const [adminType, setAdminType] = useState('congestion'); 
   const [penalty, setPenalty] = useState(5.0); 
 
-  // --- 🌟 MỚI: STATE CHO TÍNH NĂNG MÔ PHỎNG & THUẬT TOÁN ---
-  const [visualMode, setVisualMode] = useState(false); 
-  const [isVisualizing, setIsVisualizing] = useState(false); 
-  const [visitedNodes, setVisitedNodes] = useState([]); 
-  const [algorithm, setAlgorithm] = useState('astar'); // Thêm state quản lý thuật toán
-
-  // --- LẤY DỮ LIỆU GIAO THÔNG ---
+  // --- HÀM LẤY DỮ LIỆU GIAO THÔNG (REFRESH) ---
   const refreshTrafficData = useCallback(async () => {
     try {
       const data = await getActiveTraffic();
-      if (data && Array.isArray(data)) setTrafficSegments(data);
+      // Backend trả về mảng các đoạn đường đang có sự cố
+      if (data && Array.isArray(data)) {
+        setTrafficSegments(data);
+      }
     } catch (error) {
       console.error("Lỗi khi lấy dữ liệu traffic:", error);
     }
   }, []);
+ 
+  // Tạo useEffect mới
+  useEffect(() => {
+    // Khi component bị đóng, xóa interval ngay lập tức
+    return () => {
+        if (pathIntervalRef.current) clearInterval(pathIntervalRef.current);
+    };
+}, []); 
 
   useEffect(() => {
     refreshTrafficData();
   }, [refreshTrafficData]);
+  
+  // Hiện từng node trên đường đi
+  const animatePath = (fullPath) => {
+    // Bước A: Xóa bỏ mọi interval đang chạy trước đó (nếu có)
+    if (pathIntervalRef.current) {
+        clearInterval(pathIntervalRef.current);
+    }
 
-  // --- HÀM CHẠY HIỆU ỨNG LOANG MÀU ---
-  const animateSearchProcess = (historyCoords, finalPath) => {
-    setIsVisualizing(true);
-    setVisitedNodes([]); 
+    // Bước B: Reset đường đi về rỗng để bắt đầu vẽ từ đầu
     setPath([]); 
-
+    
     let currentIndex = 0;
-    const CHUNK_SIZE = 15; 
+    const speed = 30; // Tốc độ vẽ: 30ms/node. Bạn có thể tăng lên 50 nếu muốn chậm hơn.
 
-    const timer = setInterval(() => {
-      if (currentIndex >= historyCoords.length) {
-        clearInterval(timer);
-        setPath(finalPath);
-        setIsVisualizing(false);
-        return;
-      }
-
-      const chunk = historyCoords.slice(currentIndex, currentIndex + CHUNK_SIZE);
-      setVisitedNodes(prev => [...prev, ...chunk]);
-      
-      currentIndex += CHUNK_SIZE;
-    }, 20); 
-  };
-
-  // --- LOGIC TÌM ĐƯỜNG (ĐÃ CẬP NHẬT) ---
+    // Bước C: Thiết lập interval để nạp dần tọa độ
+    pathIntervalRef.current = setInterval(() => {
+        if (currentIndex < fullPath.length) {
+            // Cập nhật path: lấy thêm 1 node mỗi lần chạy
+            setPath(fullPath.slice(0, currentIndex + 1));
+            currentIndex++;
+        } else {
+            // Bước D: Khi vẽ xong thì dọn dẹp interval
+            clearInterval(pathIntervalRef.current);
+            pathIntervalRef.current = null;
+        }
+    }, speed);
+}; 
+  // --- LOGIC TÌM ĐƯỜNG ĐỒNG BỘ VỚI BACKEND ---
   const performRouting = async (s, e) => {
     if (!s || !e) return;
-    if (isVisualizing) return; 
-
     setLoading(true);
     try {
-      // Gửi thêm biến visualize và algorithm xuống backend
       const data = await findPath({
         start_lat: parseFloat(s.lat),
         start_lon: parseFloat(s.lng),
         end_lat: parseFloat(e.lat),
-        end_lon: parseFloat(e.lng),
-        visualize: visualMode,
-        algorithm: algorithm // Truyền thuật toán người dùng chọn
+        end_lon: parseFloat(e.lng)
       });
 
+      console.log("Dữ liệu nhận được:", data);
+
+      // 1. Xử lý trường hợp ngoài phạm vi (Geofencing)
       if (data.status === "outside_bounds") {
         alert(data.message); 
-        setEnd(null); setPath([]); setVisitedNodes([]);
+        setEnd(null); 
+        setPath([]);
         return;
       }
 
+      // 2. Xử lý thành công
       if (data.status === "success" && data.path && data.path.length > 0) {
+        //setPath(data.path)
+        animatePath(data.path); 
+
+        // --- CẢI TIẾN QUAN TRỌNG: SNAP MARKER TO ROAD ---
+        // Lấy tọa độ Node thực tế đầu tiên và cuối cùng từ kết quả của Backend
         const actualStart = data.path[0];
         const actualEnd = data.path[data.path.length - 1];
 
+        // Cập nhật lại vị trí Marker để chúng khớp hoàn toàn với điểm đầu/cuối của đường xanh
         setStart({ lat: actualStart.lat, lng: actualStart.lng });
         setEnd({ lat: actualEnd.lat, lng: actualEnd.lng });
+        // ----------------------------------------------
 
-        if (visualMode && data.history && data.history.length > 0) {
-          animateSearchProcess(data.history, data.path);
-        } else {
-          setPath(data.path);
-          setVisitedNodes([]); 
-        }
       } else {
         alert(data.message || "Không tìm thấy lộ trình khả dụng.");
-        setPath([]); setEnd(null); setVisitedNodes([]);
+        setPath([]);
+        setEnd(null);
       }
     } catch (err) {
       alert("Lỗi kết nối Server: " + err.message);
-      setPath([]); setVisitedNodes([]);
+      setPath([]);
     } finally {
       setLoading(false);
     }
@@ -112,23 +120,27 @@ function App() {
 
   // --- XỬ LÝ CLICK BẢN ĐỒ ---
   const handleMapSelection = async (latlng) => {
-    if (isAdmin || isVisualizing) return; 
+    if (isAdmin) return; // Không làm gì nếu đang ở chế độ Admin
 
     if (!start || (start && end)) {
+      // Nếu chưa có start hoặc đã có cả cặp (vừa hoàn thành 1 tour) -> Reset chọn mới
       setStart(latlng);
       setEnd(null);
       setPath([]);
-      setVisitedNodes([]); 
     } else {
+      // Đã có start, giờ chọn end
       setEnd(latlng);
       await performRouting(start, latlng);
     }
   };
 
+  // --- LOGIC BÁO CÁO SỰ CỐ (ADMIN) ---
   const handleReportAdminPath = async (pathCoords, type, pValue) => {
     if (!pathCoords || pathCoords.length < 2) return;
+
     setLoading(true);
     try {
+      // Đồng bộ với Schema TrafficPathUpdate trong main.py
       const response = await updateTraffic({
         path_coordinates: pathCoords, 
         flood: type === 'flood' ? pValue : 0.0,
@@ -136,8 +148,12 @@ function App() {
       });
 
       if (response.status === "success") {
-        await refreshTrafficData(); 
-        if (start && end) await performRouting(start, end);
+        await refreshTrafficData(); // Load lại các vệt màu sự cố
+        
+        // CỰC KỲ QUAN TRỌNG: Nếu đang có sẵn đường đi, tự động tìm lại để xem kết quả "né"
+        if (start && end) {
+          await performRouting(start, end);
+        }
       } else {
         alert("Lỗi Admin: " + response.message);
       }
@@ -148,6 +164,7 @@ function App() {
     }
   };
 
+  // --- RESET TOÀN BỘ HỆ THỐNG ---
   const handleResetTraffic = async () => {
     if (window.confirm("Xác nhận xóa toàn bộ dữ liệu sự cố và khôi phục giao thông bình thường?")) {
       try {
@@ -155,7 +172,7 @@ function App() {
         if (response.status === "success") {
           setTrafficSegments([]);
           setPath([]);
-          setVisitedNodes([]);
+          // Tìm lại đường (sẽ quay về đường ngắn nhất gốc)
           if (start && end) await performRouting(start, end);
           alert(response.message);
         }
@@ -184,93 +201,76 @@ function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#e67e22' }}>🛠 Chế độ Admin</span>
                 <input 
-                    type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} disabled={isVisualizing}
+                    type="checkbox" 
+                    checked={isAdmin} 
+                    onChange={(e) => setIsAdmin(e.target.checked)}
                     style={{ cursor: 'pointer', width: '20px', height: '20px' }}
                 />
             </div>
+            
             {isAdmin && (
                 <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <select value={adminType} onChange={(e) => setAdminType(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}>
+                    <select 
+                        value={adminType} 
+                        onChange={(e) => setAdminType(e.target.value)}
+                        style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                    >
                         <option value="congestion">Báo Tắc đường (x Hệ số)</option>
                         <option value="flood">Báo Ngập lụt (Chặn đường)</option>
                     </select>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Hệ số:</label>
-                        <input type="number" value={penalty} onChange={(e) => setPenalty(parseFloat(e.target.value))} style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #ddd' }}/>
+                        <input 
+                            type="number" 
+                            value={penalty} 
+                            onChange={(e) => setPenalty(parseFloat(e.target.value))}
+                            style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #ddd' }}
+                        />
                     </div>
-                    <button onClick={handleResetTraffic} style={{ marginTop: '5px', padding: '8px', background: '#e67e22', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
+                    <button 
+                      onClick={handleResetTraffic}
+                      style={{
+                        marginTop: '5px', padding: '8px', background: '#e67e22', color: 'white',
+                        border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold'
+                      }}
+                    >
                       Xóa toàn bộ sự cố
                     </button>
                 </div>
             )}
         </div>
 
-        {/* SEARCH PANELS */}
+        {/* SEARCH & STATUS */}
         <SearchPanel 
             label="📍 ĐIỂM XUẤT PHÁT"
             placeholder={start ? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}` : "Click bản đồ để chọn..."} 
-            onLocationSelect={(coords) => { setStart(coords); setPath([]); setVisitedNodes([]); }} 
+            onLocationSelect={(coords) => { setStart(coords); setPath([]); }} 
         />
+        
         <SearchPanel 
             label="🏁 ĐIỂM ĐẾN"
             placeholder={end ? `${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}` : "Click bản đồ để chọn..."} 
             onLocationSelect={(coords) => { setEnd(coords); if(start) performRouting(start, coords); }} 
         />
 
-        {/* 🌟 MỚI: TÙY CHỌN THUẬT TOÁN & HIỂN THỊ TRỰC QUAN */}
-        <div style={{ margin: '15px 0', padding: '15px', background: '#e8f4f8', borderRadius: '8px', border: '1px solid #bce8f1' }}>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#2c3e50', display: 'block', marginBottom: '5px' }}>
-              Chọn thuật toán:
-            </label>
-            <select 
-              value={algorithm} 
-              onChange={(e) => { setAlgorithm(e.target.value); setPath([]); setVisitedNodes([]); }}
-              disabled={isVisualizing}
-              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '13px', cursor: 'pointer' }}
-            >
-              <option value="astar">Thuật toán A*</option>
-              <option value="dijkstra">Thuật toán Dijkstra</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input 
-              type="checkbox" 
-              id="visualToggle"
-              checked={visualMode}
-              onChange={(e) => setVisualMode(e.target.checked)}
-              disabled={isVisualizing} 
-              style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-            />
-            <label htmlFor="visualToggle" style={{ fontSize: '13px', fontWeight: 'bold', color: '#2980b9', cursor: 'pointer', margin: 0 }}>
-              👁️ Xem AI loang màu tìm đường
-            </label>
-          </div>
-        </div>
-
-        {/* BẢNG TRẠNG THÁI */}
         <div className="status-box" style={{ 
-            marginTop: '10px', padding: '10px', background: '#f8f9fa', borderRadius: '8px',
-            borderLeft: `4px solid ${isVisualizing ? '#9b59b6' : loading ? '#3498db' : '#2ecc71'}`
+            marginTop: '15px', padding: '10px', background: '#f8f9fa', borderRadius: '8px',
+            borderLeft: `4px solid ${loading ? '#3498db' : '#2ecc71'}`
         }}>
-          <p style={{ fontSize: '13px', color: '#34495e', margin: 0, fontWeight: isVisualizing ? 'bold' : 'normal' }}>
-            {isVisualizing ? "🤖 AI đang suy nghĩ và lan truyền..." :
-            isAdmin ? "✏️ Admin: Click điểm đầu, kéo chuột vẽ đoạn tắc" :
-            !start ? "👉 Bước 1: Chọn điểm xuất phát" : 
-            !end ? "👉 Bước 2: Chọn điểm đến" : 
-            loading ? "⏳ Đang kết nối Server..." : "✅ Lộ trình tối ưu đã hoàn tất"}
+          <p style={{ fontSize: '13px', color: '#34495e', margin: 0 }}>
+            {isAdmin ? "✏️ Admin: Click điểm đầu, kéo chuột vẽ đoạn tắc" :
+             !start ? "👉 Bước 1: Chọn điểm xuất phát" : 
+             !end ? "👉 Bước 2: Chọn điểm đến" : 
+             loading ? "⏳ Đang tính toán lộ trình tối ưu..." : "✅ Đường đi đã được cập nhật"}
           </p>
         </div>
 
         {(start || end) && !isAdmin && (
           <button 
-            onClick={() => { setStart(null); setEnd(null); setPath([]); setVisitedNodes([]); }}
-            disabled={isVisualizing}
+            onClick={() => { setStart(null); setEnd(null); setPath([]); }}
             style={{
-              marginTop: '15px', width: '100%', padding: '10px', background: isVisualizing ? '#bdc3c7' : '#e74c3c', 
-              color: 'white', border: 'none', borderRadius: '6px', cursor: isVisualizing ? 'not-allowed' : 'pointer', fontWeight: 'bold'
+              marginTop: '15px', width: '100%', padding: '10px', background: '#e74c3c', 
+              color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold'
             }}
           >
             Xóa lộ trình & Chọn lại
@@ -285,7 +285,6 @@ function App() {
         startCoord={start} 
         endCoord={end} 
         path={path} 
-        visitedNodes={visitedNodes}
         onMapClick={handleMapSelection} 
         onMapRightClick={handleReportAdminPath} 
         isAdminMode={isAdmin}
